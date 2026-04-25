@@ -1,0 +1,285 @@
+openapi: 3.0.3
+info:
+  title: MarkCRDT REST API
+  version: 0.1.0
+  description: |
+    Control-plane for MarkCRDT documents. Real-time edits flow over the
+    WebSocket sync protocol described in `sync-protocol.md`; this surface
+    is for document lifecycle, history, and exports.
+
+servers:
+  - url: https://api.markcrdt.example/v1
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+
+  schemas:
+    OpId:
+      type: object
+      required: [lamport, replica]
+      properties:
+        lamport: { type: integer, format: int64, minimum: 0 }
+        replica: { type: string, format: uuid }
+
+    VersionVector:
+      type: object
+      additionalProperties:
+        type: integer
+        format: int64
+        minimum: 0
+      description: >
+        Map of replica_id (uuid as string) → highest contiguous Lamport
+        timestamp acknowledged from that replica.
+
+    Document:
+      type: object
+      required: [id, created_at, version]
+      properties:
+        id:         { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        version:    { $ref: '#/components/schemas/VersionVector' }
+
+    Block:
+      type: object
+      required: [id, type]
+      properties:
+        id:    { $ref: '#/components/schemas/OpId' }
+        type:
+          type: string
+          enum: [doc, paragraph, heading, list, list_item, blockquote,
+                 code_block, thematic_break, table, table_row, table_cell,
+                 html_block]
+        attrs:    { type: object, additionalProperties: true }
+        text:     { type: string, description: "Visible text (tombstones removed)" }
+        marks:
+          type: array
+          items: { $ref: '#/components/schemas/MarkSpan' }
+        children:
+          type: array
+          items: { $ref: '#/components/schemas/Block' }
+
+    MarkSpan:
+      type: object
+      required: [type, start, end]
+      properties:
+        type:  { type: string, example: strong }
+        attrs: { type: object, additionalProperties: true }
+        start: { type: integer, minimum: 0, description: char offset in `text` }
+        end:   { type: integer, minimum: 0 }
+
+    Op:
+      type: object
+      required: [kind, id, deps, payload]
+      properties:
+        kind:
+          type: string
+          enum:
+            - InsertBlock
+            - MoveBlock
+            - DeleteBlock
+            - SetBlockAttr
+            - InsertText
+            - DeleteText
+            - AddMark
+            - RemoveMark
+            - SetMarkAttr
+        id:      { $ref: '#/components/schemas/OpId' }
+        deps:    { $ref: '#/components/schemas/VersionVector' }
+        payload: { type: object, additionalProperties: true }
+
+    OpBatch:
+      type: object
+      required: [ops]
+      properties:
+        ops:
+          type: array
+          items: { $ref: '#/components/schemas/Op' }
+
+    Replica:
+      type: object
+      required: [id, document_id]
+      properties:
+        id:           { type: string, format: uuid }
+        document_id:  { type: string, format: uuid }
+        label:        { type: string }
+        last_seen_at: { type: string, format: date-time }
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:    { type: string }
+        message: { type: string }
+
+security:
+  - bearer: []
+
+paths:
+  /documents:
+    post:
+      summary: Create an empty document
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Document' }
+
+  /documents/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Fetch document metadata
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Document' }
+        '404': { description: Not found }
+    delete:
+      summary: Delete document and all its replicas
+      responses:
+        '204': { description: Deleted }
+
+  /documents/{id}/state:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Materialised tree (renderer-friendly)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, version, root]
+                properties:
+                  id:      { type: string, format: uuid }
+                  version: { $ref: '#/components/schemas/VersionVector' }
+                  root:    { $ref: '#/components/schemas/Block' }
+
+  /documents/{id}/markdown:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Rendered Markdown source
+      responses:
+        '200':
+          description: OK
+          content:
+            text/markdown:
+              schema: { type: string }
+
+  /documents/{id}/snapshot/latest:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Latest CRDT snapshot
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-MarkCRDT-Version:
+              schema: { type: string }
+              description: Version vector encoded as compact base64 JSON
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+
+  /documents/{id}/ops:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Ops newer than a given version vector
+      parameters:
+        - in: query
+          name: since
+          required: true
+          description: VersionVector encoded as URL-safe base64 JSON
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpBatch' }
+    post:
+      summary: Submit a batch of ops (idempotent on `(lamport, replica)`)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OpBatch' }
+      responses:
+        '200':
+          description: Accepted; returns the resulting version vector
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version]
+                properties:
+                  version: { $ref: '#/components/schemas/VersionVector' }
+        '409':
+          description: Causal dependency missing — submit the missing ops first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /documents/{id}/replicas:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Register a replica and mint a `replica_id`
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string }
+      responses:
+        '201':
+          description: Registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Replica' }
+
+  /documents/{id}/replicas/{rid}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+      - in: path
+        name: rid
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      summary: Forget a retired replica (removes it from GC watermark)
+      responses:
+        '204': { description: Deleted }
