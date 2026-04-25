@@ -447,6 +447,13 @@ Full framing in [`sync-protocol.md`](./sync-protocol.md).
 
 ## 6. Worked example
 
+A full trace of two replicas (Alice + Bob) editing the same document — with
+every API call, WebSocket frame, and database row — lives in
+[`example-edit-flow.md`](./example-edit-flow.md). What follows here is the
+short Peritext-bias illustration.
+
+### 6.1 Mark bias on trailing input
+
 Two replicas, `A` and `B`, both observe a paragraph containing `"Hi"` (chars
 `h@(1,A)`, `i@(2,A)`).
 

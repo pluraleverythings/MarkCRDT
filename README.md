@@ -18,8 +18,9 @@ operation set, and synchronization API.
 
 ```
 docs/
-  DESIGN.md       – overall design (this document is the source of truth)
-  schema.sql      – reference PostgreSQL schema
-  openapi.yaml    – REST surface
-  sync-protocol.md– WebSocket sync protocol
+  DESIGN.md             – overall design (this document is the source of truth)
+  schema.sql            – reference PostgreSQL schema
+  openapi.yaml          – REST surface
+  sync-protocol.md      – WebSocket sync protocol
+  example-edit-flow.md  – worked two-replica edit trace (API + DB writes/reads)
 ```
