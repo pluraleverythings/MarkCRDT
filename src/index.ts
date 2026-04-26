@@ -26,3 +26,20 @@ export {
   type Multiplicity,
   type Growth,
 } from "./markBehavior.js";
+export {
+  CommentStore,
+  type Comment,
+  type CommentReply,
+  type CommentOp,
+  type CommentCreateOp,
+  type CommentReplyOp,
+  type CommentResolveOp,
+  type CommentDeleteOp,
+} from "./comments.js";
+export {
+  CommentManager,
+  type CommentManagerOptions,
+  type CommentMarkValue,
+  type CommentWithRange,
+  type CreateResult,
+} from "./commentManager.js";

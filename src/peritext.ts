@@ -280,6 +280,48 @@ export class Peritext {
     return runs;
   }
 
+  /**
+   * Visible range over which the given mark op is currently active. Returns
+   * `null` if the op isn't applied or its active range is empty (e.g. every
+   * character it covered has been deleted). Read-only — does not change the
+   * CRDT state.
+   */
+  markRange(markOpId: OpId): { start: number; end: number } | null {
+    const key = opIdToString(markOpId);
+    if (!this.markOps.has(key)) return null;
+    let active: Set<string> = new Set();
+    let visible = 0;
+    let start = -1;
+    let end = -1;
+    for (const node of this.seq) {
+      if (node.markOpsBefore) active = new Set(node.markOpsBefore);
+      if (!node.deleted) {
+        if (active.has(key)) {
+          if (start < 0) start = visible;
+          end = visible + 1;
+        }
+        visible++;
+      }
+      if (node.markOpsAfter) active = new Set(node.markOpsAfter);
+    }
+    if (start < 0) return null;
+    return { start, end };
+  }
+
+  /** Enumerate every applied mark op (in no particular order). */
+  marks(): readonly MarkOp[] {
+    return Array.from(this.markOps.values());
+  }
+
+  /** Enumerate only marks of a given type. */
+  marksOfType(markType: MarkType): MarkOp[] {
+    const out: MarkOp[] = [];
+    for (const op of this.markOps.values()) {
+      if (op.markType === markType) out.push(op);
+    }
+    return out;
+  }
+
   // -------------------------------------------------------------------------
   // Sequence CRDT (RGA)
   // -------------------------------------------------------------------------
