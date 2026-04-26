@@ -1,23 +1,13 @@
 {
-  "name": "markcrdt",
-  "version": "0.1.0",
-  "description": "Peritext CRDT for collaborative rich text editing.",
-  "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "files": [
-    "dist",
-    "src"
+  "name": "markcrdt-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "packages/*"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
-  },
-  "devDependencies": {
-    "tsx": "^4.21.0",
-    "typescript": "^5.5.4",
-    "vitest": "^2.0.5"
+    "build": "npm run -ws --if-present build",
+    "test": "npm run -ws --if-present test",
+    "typecheck": "npm run -ws --if-present typecheck"
   }
 }
