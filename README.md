@@ -1,26 +1,55 @@
-# MarkCRDT
+# MarkCRDT — Peritext
 
-A Conflict-Free Replicated Data Type for collaborative Markdown editing.
+A TypeScript implementation of the
+[Peritext](https://www.inkandswitch.com/peritext/) CRDT for collaborative
+rich-text editing.
 
-MarkCRDT models a Markdown document as a **tree of blocks** (paragraphs,
-headings, lists, code blocks, …) where:
+A document is a sequence of characters identified by Lamport `OpId`s
+(`counter@node`). On top of the sequence sits a set of mark operations
+(`addMark` / `removeMark`) whose anchors are pinned to character `OpId`s
+with a `before`/`after` bias, so concurrent inserts at a span boundary fall
+inside or outside the span deterministically. Conflicting mark values
+(e.g. red vs. blue) collapse via Last-Write-Wins by `OpId`; non-exclusive
+marks (e.g. comments) stack.
 
-- block ordering and nesting are captured by a list/tree CRDT,
-- text inside each block is captured by a sequence CRDT,
-- inline formatting (bold, italic, link, …) is captured by a Peritext-style
-  mark CRDT keyed on stable text positions.
+## Install / build
 
-The repository currently contains the design only. See
-[`docs/DESIGN.md`](docs/DESIGN.md) for the full data model, database schema,
-operation set, and synchronization API.
+```
+npm install
+npm test           # vitest
+npm run typecheck
+```
+
+## Quick start
+
+```ts
+import { Peritext } from "markcrdt";
+
+const a = new Peritext({ node: "alice" });
+a.insert(0, "Hello world");
+a.addMark(0, 5, "bold", true);
+
+const b = new Peritext({ node: "bob" });
+// in real use you'd ship ops over a network; here we just replay them.
+// (See `test/replay.test.ts` for an out-of-order replay example.)
+
+console.log(a.render());
+// [
+//   { text: "Hello", format: { bold: true } },
+//   { text: " world", format: {} },
+// ]
+```
 
 ## Layout
 
 ```
-docs/
-  DESIGN.md             – overall design (this document is the source of truth)
-  schema.sql            – reference PostgreSQL schema
-  openapi.yaml          – REST surface
-  sync-protocol.md      – WebSocket sync protocol
-  example-edit-flow.md  – worked two-replica edit trace (API + DB writes/reads)
+src/
+  opId.ts          — Lamport OpId type + comparison
+  operations.ts    — Op shapes (insert / remove / addMark / removeMark)
+  markBehavior.ts  — per-mark-type registry (single vs multi, grow vs fixed)
+  peritext.ts      — sequence CRDT + mark application + render
+  index.ts         — public surface
+test/
+  peritext.test.ts — examples from the paper
+  replay.test.ts   — idempotency, order independence, tombstones
 ```
