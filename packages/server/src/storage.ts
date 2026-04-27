@@ -1,7 +1,10 @@
 import type {
+  DocMember,
   DocMeta,
   DocSnapshot,
   OpEnvelope,
+  Role,
+  User,
   VersionVector,
 } from "./types.js";
 
@@ -12,10 +15,34 @@ import type {
 // All methods are async so the same call sites work for either backend.
 export interface Storage {
   // ---- Documents -----------------------------------------------------------
-  createDoc(): Promise<DocMeta>;
+  /**
+   * Create a new document. If `ownerId` is given, the user is added as a
+   * member with role `owner` in the same transaction.
+   */
+  createDoc(opts?: { ownerId?: string }): Promise<DocMeta>;
   getDoc(docId: string): Promise<DocMeta | null>;
   listDocs(limit?: number): Promise<DocMeta[]>;
   touchDoc(docId: string): Promise<void>;
+
+  // ---- Users --------------------------------------------------------------
+  /** `handle` is the unique stable name used for lookups (email-ish). */
+  createUser(input: {
+    handle: string;
+    displayName?: string | null;
+  }): Promise<User>;
+  getUser(userId: string): Promise<User | null>;
+  getUserByHandle(handle: string): Promise<User | null>;
+  listUsers(limit?: number): Promise<User[]>;
+  /** Cascades to memberships. Documents the user owned remain. */
+  deleteUser(userId: string): Promise<void>;
+
+  // ---- Membership ---------------------------------------------------------
+  addMember(docId: string, userId: string, role: Role): Promise<DocMember>;
+  removeMember(docId: string, userId: string): Promise<void>;
+  getMember(docId: string, userId: string): Promise<DocMember | null>;
+  listMembers(docId: string): Promise<DocMember[]>;
+  /** Documents this user is a member of (any role), most recent first. */
+  listDocsForUser(userId: string, limit?: number): Promise<DocMeta[]>;
 
   // ---- Ops ----------------------------------------------------------------
 

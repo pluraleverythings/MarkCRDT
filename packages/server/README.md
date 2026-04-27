@@ -26,13 +26,39 @@ DATABASE_URL=postgres://user:pass@host/db \
 
 ## HTTP API
 
+### Documents
+
 | Method | Path | Body / Query | Returns |
 |---|---|---|---|
-| `POST` | `/documents` | — | `DocMeta` |
+| `POST` | `/documents` | `{ ownerId? }` | `DocMeta` |
 | `GET` | `/documents` | `?limit=N` | `DocMeta[]` |
 | `GET` | `/documents/:id` | — | `DocMeta` |
 | `GET` | `/documents/:id/state` | `?vv=<base64-json>` | `{ vv, snapshot?, ops }` |
 | `POST` | `/documents/:id/ops` | `{ ops: OpEnvelope[] }` | `{ accepted, vv }` |
+
+### Users
+
+| Method | Path | Body / Query | Returns |
+|---|---|---|---|
+| `POST` | `/users` | `{ handle, displayName? }` | `User` (409 if handle taken) |
+| `GET` | `/users` | `?handle=H` *or* `?limit=N` | `User[]` |
+| `GET` | `/users/:id` | — | `User` |
+| `DELETE` | `/users/:id` | — | `204` (cascades to memberships) |
+| `POST` | `/users/:id/documents` | — | `DocMeta` (user is owner) |
+| `GET` | `/users/:id/documents` | `?limit=N` | `DocMeta[]` (every doc the user is a member of) |
+
+### Membership
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `GET` | `/documents/:id/members` | — | `DocMember[]` |
+| `PUT` | `/documents/:id/members/:userId` | `{ role: "owner"\|"editor"\|"viewer" }` | `DocMember` (upserts) |
+| `DELETE` | `/documents/:id/members/:userId` | — | `204` |
+
+> The HTTP layer **does not enforce authorization** — it provides the
+> data primitives (users, membership, roles) that an auth middleware
+> would gate on. Drop a `preHandler` hook on the `/documents/*` routes to
+> check `getMember(docId, currentUserId)` against the required role.
 
 `OpEnvelope` shape:
 

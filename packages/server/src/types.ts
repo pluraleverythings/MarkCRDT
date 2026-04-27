@@ -40,6 +40,26 @@ export interface DocMeta {
 }
 
 // ---------------------------------------------------------------------------
+// Users + membership
+// ---------------------------------------------------------------------------
+
+export interface User {
+  id: string;
+  handle: string;
+  displayName: string | null;
+  createdAt: string;
+}
+
+export type Role = "owner" | "editor" | "viewer";
+
+export interface DocMember {
+  docId: string;
+  userId: string;
+  role: Role;
+  addedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // WebSocket frames
 // ---------------------------------------------------------------------------
 

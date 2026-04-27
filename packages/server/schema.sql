@@ -37,3 +37,28 @@ CREATE TABLE IF NOT EXISTS snapshot (
 );
 
 CREATE INDEX IF NOT EXISTS snapshot_latest ON snapshot (doc_id, taken_at DESC);
+
+-- Users + membership.
+--
+-- "app_user" rather than "user" to avoid Postgres's reserved word.
+-- Membership is a simple ACL: a row grants a user a role on a document.
+-- Role values are kept inline (CHECK constraint) rather than a separate
+-- enum so adding a role doesn't need a migration on every shard.
+
+CREATE TABLE IF NOT EXISTS app_user (
+  id            UUID PRIMARY KEY,
+  handle        TEXT NOT NULL UNIQUE,
+  display_name  TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS document_member (
+  doc_id    UUID NOT NULL REFERENCES document(id) ON DELETE CASCADE,
+  user_id   UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  role      TEXT NOT NULL CHECK (role IN ('owner','editor','viewer')),
+  added_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (doc_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS document_member_by_user
+  ON document_member (user_id, added_at DESC);

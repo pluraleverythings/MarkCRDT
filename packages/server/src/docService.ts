@@ -20,8 +20,8 @@ export class DocService {
     private readonly snapshotter?: SnapshotTrigger,
   ) {}
 
-  async createDoc(): Promise<DocMeta> {
-    return this.storage.createDoc();
+  async createDoc(opts?: { ownerId?: string }): Promise<DocMeta> {
+    return this.storage.createDoc(opts);
   }
 
   async getDoc(docId: string): Promise<DocMeta | null> {
@@ -30,6 +30,11 @@ export class DocService {
 
   async listDocs(limit?: number): Promise<DocMeta[]> {
     return this.storage.listDocs(limit);
+  }
+
+  /** Pass-through accessor so HTTP routes can reach storage primitives. */
+  get db(): Storage {
+    return this.storage;
   }
 
   /** Bootstrap payload for a new client: snapshot (if any) + ops since. */

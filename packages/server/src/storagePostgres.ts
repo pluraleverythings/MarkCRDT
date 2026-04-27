@@ -3,11 +3,15 @@ import type { Pool } from "pg";
 import { keyOf } from "./opKey.js";
 import type { Storage } from "./storage.js";
 import type {
+  DocMember,
   DocMeta,
   DocSnapshot,
   OpEnvelope,
+  Role,
+  User,
   VersionVector,
 } from "./types.js";
+import { HandleTaken } from "./storageMemory.js";
 
 // Postgres-backed Storage. Designed for horizontal scale-out: every
 // instance is stateless and operates against the shared database.
@@ -22,13 +26,35 @@ import type {
 export class PostgresStorage implements Storage {
   constructor(private readonly pool: Pool) {}
 
-  async createDoc(): Promise<DocMeta> {
+  async createDoc(opts?: { ownerId?: string }): Promise<DocMeta> {
     const id = randomUUID();
-    const { rows } = await this.pool.query<DocRow>(
-      `INSERT INTO document (id) VALUES ($1) RETURNING id, created_at, updated_at`,
-      [id],
-    );
-    return rowToMeta(rows[0]!);
+    if (!opts?.ownerId) {
+      const { rows } = await this.pool.query<DocRow>(
+        `INSERT INTO document (id) VALUES ($1) RETURNING id, created_at, updated_at`,
+        [id],
+      );
+      return rowToMeta(rows[0]!);
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<DocRow>(
+        `INSERT INTO document (id) VALUES ($1) RETURNING id, created_at, updated_at`,
+        [id],
+      );
+      await client.query(
+        `INSERT INTO document_member (doc_id, user_id, role)
+         VALUES ($1, $2, 'owner')`,
+        [id, opts.ownerId],
+      );
+      await client.query("COMMIT");
+      return rowToMeta(rows[0]!);
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async getDoc(docId: string): Promise<DocMeta | null> {
@@ -181,6 +207,151 @@ export class PostgresStorage implements Storage {
       state: r.state,
     };
   }
+
+  // -------------------------------------------------------------------------
+  // Users
+  // -------------------------------------------------------------------------
+
+  async createUser(input: {
+    handle: string;
+    displayName?: string | null;
+  }): Promise<User> {
+    const id = randomUUID();
+    try {
+      const { rows } = await this.pool.query<UserRow>(
+        `INSERT INTO app_user (id, handle, display_name)
+         VALUES ($1, $2, $3)
+         RETURNING id, handle, display_name, created_at`,
+        [id, input.handle.trim(), input.displayName ?? null],
+      );
+      return rowToUser(rows[0]!);
+    } catch (err) {
+      // 23505 = unique_violation — translate to a typed error so callers
+      // can distinguish a 409 from a 500.
+      if ((err as { code?: string }).code === "23505") {
+        throw new HandleTaken(input.handle);
+      }
+      throw err;
+    }
+  }
+
+  async getUser(userId: string): Promise<User | null> {
+    const { rows } = await this.pool.query<UserRow>(
+      `SELECT id, handle, display_name, created_at FROM app_user WHERE id = $1`,
+      [userId],
+    );
+    return rows[0] ? rowToUser(rows[0]) : null;
+  }
+
+  async getUserByHandle(handle: string): Promise<User | null> {
+    const { rows } = await this.pool.query<UserRow>(
+      `SELECT id, handle, display_name, created_at FROM app_user WHERE handle = $1`,
+      [handle],
+    );
+    return rows[0] ? rowToUser(rows[0]) : null;
+  }
+
+  async listUsers(limit = 100): Promise<User[]> {
+    const { rows } = await this.pool.query<UserRow>(
+      `SELECT id, handle, display_name, created_at FROM app_user
+       ORDER BY created_at DESC LIMIT $1`,
+      [limit],
+    );
+    return rows.map(rowToUser);
+  }
+
+  async deleteUser(userId: string): Promise<void> {
+    await this.pool.query(`DELETE FROM app_user WHERE id = $1`, [userId]);
+  }
+
+  // -------------------------------------------------------------------------
+  // Membership
+  // -------------------------------------------------------------------------
+
+  async addMember(
+    docId: string,
+    userId: string,
+    role: Role,
+  ): Promise<DocMember> {
+    const { rows } = await this.pool.query<MemberRow>(
+      `INSERT INTO document_member (doc_id, user_id, role)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (doc_id, user_id) DO UPDATE SET role = EXCLUDED.role
+       RETURNING doc_id, user_id, role, added_at`,
+      [docId, userId, role],
+    );
+    return rowToMember(rows[0]!);
+  }
+
+  async removeMember(docId: string, userId: string): Promise<void> {
+    await this.pool.query(
+      `DELETE FROM document_member WHERE doc_id = $1 AND user_id = $2`,
+      [docId, userId],
+    );
+  }
+
+  async getMember(docId: string, userId: string): Promise<DocMember | null> {
+    const { rows } = await this.pool.query<MemberRow>(
+      `SELECT doc_id, user_id, role, added_at
+       FROM   document_member WHERE doc_id = $1 AND user_id = $2`,
+      [docId, userId],
+    );
+    return rows[0] ? rowToMember(rows[0]) : null;
+  }
+
+  async listMembers(docId: string): Promise<DocMember[]> {
+    const { rows } = await this.pool.query<MemberRow>(
+      `SELECT doc_id, user_id, role, added_at
+       FROM   document_member WHERE doc_id = $1 ORDER BY added_at ASC`,
+      [docId],
+    );
+    return rows.map(rowToMember);
+  }
+
+  async listDocsForUser(userId: string, limit = 100): Promise<DocMeta[]> {
+    const { rows } = await this.pool.query<DocRow>(
+      `SELECT d.id, d.created_at, d.updated_at
+       FROM   document d
+       JOIN   document_member m ON m.doc_id = d.id
+       WHERE  m.user_id = $1
+       ORDER  BY m.added_at DESC
+       LIMIT  $2`,
+      [userId, limit],
+    );
+    return rows.map(rowToMeta);
+  }
+}
+
+interface UserRow {
+  id: string;
+  handle: string;
+  display_name: string | null;
+  created_at: Date;
+}
+
+interface MemberRow {
+  doc_id: string;
+  user_id: string;
+  role: string;
+  added_at: Date;
+}
+
+function rowToUser(r: UserRow): User {
+  return {
+    id: r.id,
+    handle: r.handle,
+    displayName: r.display_name,
+    createdAt: r.created_at.toISOString(),
+  };
+}
+
+function rowToMember(r: MemberRow): DocMember {
+  return {
+    docId: r.doc_id,
+    userId: r.user_id,
+    role: r.role as Role,
+    addedAt: r.added_at.toISOString(),
+  };
 }
 
 interface DocRow {
